@@ -1,6 +1,10 @@
 # SymFlow for Laravel
 
 [![CI](https://github.com/vandetho/symflow/actions/workflows/ci.yaml/badge.svg)](https://github.com/vandetho/symflow/actions/workflows/ci.yaml)
+[![Total Downloads](https://img.shields.io/packagist/dt/vandetho/symflow-laravel.svg)](https://packagist.org/packages/vandetho/symflow-laravel)
+[![Monthly Downloads](https://img.shields.io/packagist/dm/vandetho/symflow-laravel.svg)](https://packagist.org/packages/vandetho/symflow-laravel)
+[![Latest Version](https://img.shields.io/packagist/v/vandetho/symflow-laravel.svg)](https://packagist.org/packages/vandetho/symflow-laravel)
+[![License](https://img.shields.io/packagist/l/vandetho/symflow-laravel.svg)](https://packagist.org/packages/vandetho/symflow-laravel)
 
 A Symfony-compatible workflow engine for Laravel. State machines, Petri nets, guards, events, weighted arcs, middleware, and YAML/JSON/PHP import/export.
 
