@@ -6,8 +6,7 @@ Symfony-compatible workflow engine for Laravel. State machines, Petri nets, guar
 
 - **Packagist:** https://packagist.org/packages/vandetho/symflow-laravel
 - **Repo:** https://github.com/vandetho/symflow-laravel
-- **Monorepo:** https://github.com/vandetho/symflow (packages/laravel/)
-- **Sibling:** [symflow](https://www.npmjs.com/package/symflow) (TypeScript/Node.js version)
+- **Sibling:** [symflow](https://www.npmjs.com/package/symflow) (TypeScript/Node.js version, separate repo)
 - **Stack:** PHP 8.2+ / Laravel 11+ / Pest (test) / symfony/yaml
 - **Namespace:** `Laraflow\`
 
@@ -57,7 +56,7 @@ Symfony-compatible workflow engine for Laravel. State machines, Petri nets, guar
 - `JsonImporter` -- `{ definition, meta }` shape
 - `FileLoader` -- dispatches by extension (.yaml, .json, .php)
 - `YamlExporter` -- produces Symfony `framework.workflows` config
-- `JsonExporter`, `PhpExporter`, `MermaidExporter`, `GraphvizExporter`
+- `JsonExporter`, `PhpExporter`, `MermaidExporter`, `GraphvizExporter`, `SvgExporter` (auto-layout, dark/light theme)
 
 ### Laravel Integration
 
@@ -86,16 +85,26 @@ All readonly value objects: `Place`, `Transition`, `WorkflowDefinition`, `Workfl
 
 ```bash
 composer install
-./vendor/bin/pest              # 117 tests, 199 assertions
+./vendor/bin/pest              # 187 tests, 339 assertions
 ```
 
 ### Tests
 
 - Pest with `test()` / `expect()`
 - Fixtures in `tests/Fixtures/Definitions.php` and `tests/Fixtures/*.yaml`
-- Unit tests: Engine, Validator, Analyzer, Subject, Import, Export
+- Unit tests: Engine, Validator, Analyzer, Subject, Import, Export, Scenarios (article-workflow, blog-event, php-enum)
 - Feature tests: ServiceProvider, Facade, Artisan commands
-- 117 tests across 12 test files
+- 187 tests across 21 test files
+
+---
+
+## Release Process
+
+- **Conventional commits** (`feat:` -> minor, `fix:` -> patch, `chore:`/`docs:` -> hidden, `test:`/`ci:`/`refactor:` -> hidden)
+- **release-please** automates version bumps and `CHANGELOG.md` (config: `release-please-config.json`, manifest: `.release-please-manifest.json`, release-type: `simple`)
+- **CI** (`ci.yaml`): matrix tests on push/PR to `main` (PHP 8.2/8.3/8.4 x Laravel 11/12)
+- **Release** (`release-please.yaml`): on push to `main`, opens/updates a Release PR; merging it creates the `vX.Y.Z` tag and GitHub release with auto-generated notes
+- **Packagist** auto-syncs from GitHub via webhook (configured on packagist.org, not in this repo)
 
 ---
 

@@ -6,7 +6,7 @@
 [![Latest Version](https://img.shields.io/packagist/v/vandetho/symflow-laravel.svg)](https://packagist.org/packages/vandetho/symflow-laravel)
 [![License](https://img.shields.io/packagist/l/vandetho/symflow-laravel.svg)](https://packagist.org/packages/vandetho/symflow-laravel)
 
-A Symfony-compatible workflow engine for Laravel. State machines, Petri nets, guards, events, weighted arcs, middleware, and YAML/JSON/PHP import/export.
+A Symfony-compatible workflow engine for Laravel. State machines, Petri nets, guards, events, weighted arcs, middleware, and YAML/JSON/PHP/Mermaid/Graphviz/SVG import/export.
 
 Part of the [SymFlow](https://github.com/vandetho/symflow) ecosystem. See also [symflow](https://www.npmjs.com/package/symflow) for the TypeScript/Node.js version.
 
@@ -77,7 +77,7 @@ $workflow->apply($order, 'submit');
 - **Middleware** -- wrap `apply()` with logging, transactions, metrics
 - **Validation** -- 8 error types including BFS reachability analysis
 - **Pattern analysis** -- AND-split, AND-join, OR-split, XOR detection
-- **Import/Export** -- YAML (Symfony-compatible), JSON, PHP codegen, Mermaid, Graphviz DOT
+- **Import/Export** -- YAML (Symfony-compatible), JSON, PHP codegen, Mermaid, Graphviz DOT, SVG (auto-layout, dark/light theme)
 - **Eloquent trait** -- `HasWorkflowTrait` for model integration
 - **Laravel events** -- 7 event classes for the full transition lifecycle
 - **Artisan commands** -- `laraflow:validate`, `laraflow:mermaid`, `laraflow:dot`
