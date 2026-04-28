@@ -27,6 +27,16 @@ final class YamlImporter
             $yamlString,
         );
 
+        // Pre-process !php/const and !php/enum tags used as values.
+        // Symfony's YAML parser treats these as reserved tags and returns NULL
+        // unless PARSE_CONSTANT is used (which would require the constants to
+        // exist in PHP). Strip the FQN and keep only the short name.
+        $preprocessed = preg_replace(
+            '/!php\/(?:const|enum)\s+[^\s:]+::(\S+)/',
+            '$1',
+            $preprocessed,
+        );
+
         /** @var array<string, mixed> $parsed */
         $parsed = Yaml::parse($preprocessed, Yaml::PARSE_CUSTOM_TAGS);
         $parsed = self::resolveTaggedValues($parsed);
