@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/vandetho/symflow-laravel/compare/v1.0.0...v1.0.1) (2026-04-28)
+
+
+### Documentation
+
+* add CONTRIBUTING and SECURITY guides; link license badge to LICENSE ([7a60c51](https://github.com/vandetho/symflow-laravel/commit/7a60c51d6d10cfcf17bda821dfa39b5f284b753c))
+
 ## 1.0.0 (2026-04-28)
 
 
