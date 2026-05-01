@@ -103,8 +103,19 @@ composer install
 - **Conventional commits** (`feat:` -> minor, `fix:` -> patch, `chore:`/`docs:` -> hidden, `test:`/`ci:`/`refactor:` -> hidden)
 - **release-please** automates version bumps and `CHANGELOG.md` (config: `release-please-config.json`, manifest: `.release-please-manifest.json`, release-type: `simple`)
 - **CI** (`ci.yaml`): matrix tests on push/PR to `main` (PHP 8.2/8.3/8.4 x Laravel 11/12)
-- **Release** (`release-please.yaml`): on push to `main`, opens/updates a Release PR; merging it creates the `vX.Y.Z` tag and GitHub release with auto-generated notes
+- **Release** (`release-please.yaml`): triggered by `workflow_run` of CI on `main`. release-please reads the manifest vs git tags; if the manifest is ahead, it cuts the GitHub release + tag. Otherwise it opens/updates the Release PR.
+- **Auto-merge** (`auto-merge.yaml`): squash-merges the release-please PR (and patch/minor dependabot PRs) once checks pass. **Uses `secrets.RELEASE_PAT`** — see note below.
 - **Packagist** auto-syncs from GitHub via webhook (configured on packagist.org, not in this repo)
+
+### Required secret: `RELEASE_PAT`
+
+The auto-merge workflow needs a fine-grained Personal Access Token because pushes made by the default `GITHUB_TOKEN` are intentionally suppressed from triggering further workflows (anti-recursion safety). Without a PAT, the squash-merge of a release-please PR lands on `main` silently and `release-please.yaml` never fires, so the GitHub release/tag is never created.
+
+Setup (one-time):
+1. Create a fine-grained PAT scoped to this repo with `Contents: Read and write` and `Pull requests: Read and write`.
+2. Add it under repo Settings -> Secrets and variables -> Actions as `RELEASE_PAT`.
+
+If the secret is missing, `gh pr merge --auto` in the workflow will fail loudly — better than the silent no-op of GITHUB_TOKEN.
 
 ---
 
