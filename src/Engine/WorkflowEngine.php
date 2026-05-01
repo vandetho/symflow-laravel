@@ -26,8 +26,10 @@ class WorkflowEngine
     /** @var array<string, bool> */
     private array $placeNames;
 
-    /** @var array<string, array<callable>> */
+    /** @var array<string, array<int, array{priority: int, scope: string, cb: callable, seq: int}>> */
     private array $listeners = [];
+
+    private int $listenerSeq = 0;
 
     /** @var array<callable> */
     private array $middleware;
@@ -232,16 +234,31 @@ class WorkflowEngine
         $this->marking = $this->buildInitialMarking();
     }
 
-    public function on(WorkflowEventType $type, callable $listener): Closure
-    {
+    /**
+     * Register a listener.
+     *
+     * @param  ?string  $transitionName  Restrict to one transition; null = wildcard (all transitions)
+     * @param  int  $priority  Higher fires first; ties preserve registration order
+     */
+    public function on(
+        WorkflowEventType $type,
+        callable $listener,
+        ?string $transitionName = null,
+        int $priority = 0,
+    ): Closure {
         $key = $type->value;
         $this->listeners[$key] ??= [];
-        $this->listeners[$key][] = $listener;
+        $this->listeners[$key][] = [
+            'priority' => $priority,
+            'scope' => $transitionName ?? '*',
+            'cb' => $listener,
+            'seq' => $this->listenerSeq++,
+        ];
 
         return function () use ($key, $listener): void {
             $this->listeners[$key] = array_values(array_filter(
                 $this->listeners[$key] ?? [],
-                fn (callable $l): bool => $l !== $listener,
+                fn (array $entry): bool => $entry['cb'] !== $listener,
             ));
         };
     }
@@ -295,6 +312,23 @@ class WorkflowEngine
 
     private function emit(WorkflowEventType $type, Transition $transition): void
     {
+        $candidates = array_filter(
+            $this->listeners[$type->value] ?? [],
+            fn (array $entry): bool => $entry['scope'] === '*' || $entry['scope'] === $transition->name,
+        );
+
+        if ($candidates === []) {
+            return;
+        }
+
+        usort($candidates, function (array $a, array $b): int {
+            if ($a['priority'] !== $b['priority']) {
+                return $b['priority'] <=> $a['priority']; // higher priority first
+            }
+
+            return $a['seq'] <=> $b['seq']; // FIFO within same priority
+        });
+
         $event = new WorkflowEvent(
             type: $type,
             transition: $transition,
@@ -302,9 +336,9 @@ class WorkflowEngine
             workflowName: $this->definition->name,
         );
 
-        foreach ($this->listeners[$type->value] ?? [] as $listener) {
+        foreach ($candidates as $entry) {
             try {
-                $listener($event);
+                ($entry['cb'])($event);
             } catch (Throwable $e) {
                 match ($this->listenerErrorMode) {
                     ListenerErrorMode::Throw => throw $e,

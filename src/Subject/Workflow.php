@@ -22,7 +22,7 @@ use Throwable;
 
 class Workflow
 {
-    /** @var array<string, array<callable>> */
+    /** @var array<string, array<int, array{priority: int, scope: string, cb: callable}>> */
     private array $listeners = [];
 
     /** @var array<callable> */
@@ -97,24 +97,30 @@ class Workflow
             });
         }
 
-        // Forward events with subject
+        // Forward events with subject — register each listener individually
+        // so scope and priority are preserved at the engine level.
         $unsubscribers = [];
 
         foreach ($this->listeners as $typeValue => $typeListeners) {
             $eventType = WorkflowEventType::from($typeValue);
-            $unsubscribers[] = $engine->on($eventType, function ($event) use ($typeListeners, $subject): void {
-                $subjectEvent = new SubjectEvent(
-                    type: $event->type,
-                    transition: $event->transition,
-                    marking: $event->marking,
-                    workflowName: $event->workflowName,
-                    subject: $subject,
+            foreach ($typeListeners as $entry) {
+                $listener = $entry['cb'];
+                $unsubscribers[] = $engine->on(
+                    $eventType,
+                    function (WorkflowEvent $event) use ($listener, $subject): void {
+                        $subjectEvent = new SubjectEvent(
+                            type: $event->type,
+                            transition: $event->transition,
+                            marking: $event->marking,
+                            workflowName: $event->workflowName,
+                            subject: $subject,
+                        );
+                        $listener($subjectEvent);
+                    },
+                    $entry['scope'] === '*' ? null : $entry['scope'],
+                    $entry['priority'],
                 );
-
-                foreach ($typeListeners as $listener) {
-                    $listener($subjectEvent);
-                }
-            });
+            }
         }
 
         try {
@@ -129,16 +135,30 @@ class Workflow
         }
     }
 
-    public function on(WorkflowEventType $type, callable $listener): Closure
-    {
+    /**
+     * Register a subject-aware listener.
+     *
+     * @param  ?string  $transitionName  Restrict to one transition; null = wildcard
+     * @param  int  $priority  Higher fires first; ties preserve registration order
+     */
+    public function on(
+        WorkflowEventType $type,
+        callable $listener,
+        ?string $transitionName = null,
+        int $priority = 0,
+    ): Closure {
         $key = $type->value;
         $this->listeners[$key] ??= [];
-        $this->listeners[$key][] = $listener;
+        $this->listeners[$key][] = [
+            'priority' => $priority,
+            'scope' => $transitionName ?? '*',
+            'cb' => $listener,
+        ];
 
         return function () use ($key, $listener): void {
             $this->listeners[$key] = array_values(array_filter(
                 $this->listeners[$key] ?? [],
-                fn (callable $l): bool => $l !== $listener,
+                fn (array $entry): bool => $entry['cb'] !== $listener,
             ));
         };
     }

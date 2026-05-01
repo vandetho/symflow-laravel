@@ -42,7 +42,7 @@ $engine = new WorkflowEngine($definition);
 | `apply(string)` | `Marking` | Fire a transition (throws if blocked) |
 | `use(callable)` | `void` | Register a middleware |
 | `reset()` | `void` | Reset to initial marking |
-| `on(WorkflowEventType, callable)` | `Closure` | Subscribe to events (returns unsubscribe) |
+| `on(WorkflowEventType, callable, ?string $transitionName = null, int $priority = 0)` | `Closure` | Subscribe to events (returns unsubscribe). Optional transition scope and priority — see "Listener scoping & priority" below. |
 | `getDefinition()` | `WorkflowDefinition` | The underlying definition |
 
 ### TransitionResult
@@ -74,6 +74,41 @@ $engine = new WorkflowEngine(
     onListenerError: fn (\Throwable $e, WorkflowEvent $event) => report($e),
 );
 ```
+
+### Listener scoping & priority
+
+`on()` accepts two optional arguments to keep listener registration declarative
+instead of forcing every callback to start with
+`if ($event->transition->name === '…')`:
+
+```php
+// Wildcard listener — fires for every transition (priority 0).
+$engine->on(WorkflowEventType::Entered, fn ($e) => Audit::log($e));
+
+// Scoped listener — fires only when the 'paid' transition completes.
+$engine->on(
+    WorkflowEventType::Enter,
+    fn ($e) => Inventory::deduct($e),
+    transitionName: 'paid',
+    priority: 100, // higher = earlier
+);
+
+// Lower priority — runs after the inventory deduction above.
+$engine->on(
+    WorkflowEventType::Enter,
+    fn ($e) => Slack::notifyWarehouse($e),
+    transitionName: 'paid',
+    priority: 50,
+);
+```
+
+**Dispatch order:** higher `$priority` fires first; ties preserve registration
+order (FIFO across both wildcard and scoped registrations). Wildcard and
+scoped listeners interleave by priority globally — there is no implicit
+"wildcard always before scoped" rule.
+
+`Subject\Workflow::on()` accepts the same arguments and forwards them to the
+underlying engine.
 
 ### Listener errors
 

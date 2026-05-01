@@ -57,6 +57,41 @@ test('events include subject', function () {
     expect($receivedSubject)->toBe($order);
 });
 
+test('subject listener: scope and priority forward to engine', function () {
+    $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
+    $order = new stdClass();
+    $order->status = 'draft';
+    $order2 = new stdClass();
+    $order2->status = 'submitted';
+
+    $order = (function () {
+        $o = new stdClass();
+        $o->status = 'draft';
+        return $o;
+    })();
+
+    $calls = [];
+
+    // wildcard low priority
+    $workflow->on(WorkflowEventType::Entered, function (SubjectEvent $e) use (&$calls) {
+        $calls[] = 'wild';
+    }, priority: 1);
+
+    // scoped high priority — must fire first when transition matches
+    $workflow->on(WorkflowEventType::Entered, function (SubjectEvent $e) use (&$calls) {
+        $calls[] = 'scoped-submit';
+    }, transitionName: 'submit', priority: 100);
+
+    // scoped to a different transition — must NOT fire on submit
+    $workflow->on(WorkflowEventType::Entered, function (SubjectEvent $e) use (&$calls) {
+        $calls[] = 'scoped-approve';
+    }, transitionName: 'approve');
+
+    $workflow->apply($order, 'submit');
+
+    expect($calls)->toBe(['scoped-submit', 'wild']);
+});
+
 test('full flow through subject', function () {
     $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
     $order = new stdClass();

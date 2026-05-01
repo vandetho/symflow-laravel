@@ -380,7 +380,89 @@ test('listener errors: subsequent listeners still run in Collect mode', function
     expect($ran)->toBe(['second']);
 });
 
-// --- Weighted Arcs ---
+// --- Listener scoping & priority ---
+
+test('listener scope: scoped listener fires only for its transition', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $calls = [];
+    $engine->on(
+        WorkflowEventType::Entered,
+        function (WorkflowEvent $e) use (&$calls) { $calls[] = $e->transition->name; },
+        transitionName: 'submit',
+    );
+
+    $engine->apply('submit');   // matches
+    $engine->apply('approve');  // does not match
+    $engine->apply('fulfill');  // does not match
+
+    expect($calls)->toBe(['submit']);
+});
+
+test('listener scope: wildcard listener fires for every transition', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $calls = [];
+    $engine->on(
+        WorkflowEventType::Entered,
+        function (WorkflowEvent $e) use (&$calls) { $calls[] = $e->transition->name; },
+    );
+
+    $engine->apply('submit');
+    $engine->apply('approve');
+
+    expect($calls)->toBe(['submit', 'approve']);
+});
+
+test('listener priority: higher priority fires first', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $order = [];
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'low'; }, priority: 1);
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'high'; }, priority: 100);
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'mid'; }, priority: 50);
+
+    $engine->apply('submit');
+
+    expect($order)->toBe(['high', 'mid', 'low']);
+});
+
+test('listener priority: ties preserve registration order', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $order = [];
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'first'; });
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'second'; });
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'third'; });
+
+    $engine->apply('submit');
+
+    expect($order)->toBe(['first', 'second', 'third']);
+});
+
+test('listener priority: scoped and wildcard interleave by priority globally', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $order = [];
+
+    // Registration order intentionally does NOT match expected fire order;
+    // priority must dominate, with FIFO breaking ties across scopes.
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'wildcard@10'; }, priority: 10);
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'scoped@100'; }, transitionName: 'submit', priority: 100);
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'wildcard@50'; }, priority: 50);
+    $engine->on(WorkflowEventType::Entered, function () use (&$order) { $order[] = 'scoped@5'; }, transitionName: 'submit', priority: 5);
+
+    $engine->apply('submit');
+
+    expect($order)->toBe(['scoped@100', 'wildcard@50', 'wildcard@10', 'scoped@5']);
+});
+
+test('listener scope: unsubscribe removes listener regardless of scope/priority', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $calls = [];
+    $listener = function () use (&$calls) { $calls[] = 'fired'; };
+
+    $unsub = $engine->on(WorkflowEventType::Entered, $listener, transitionName: 'submit', priority: 5);
+    $unsub();
+    $engine->apply('submit');
+
+    expect($calls)->toBe([]);
+});
 
 test('weighted: can() returns false when marking < consumeWeight', function () {
     $engine = new WorkflowEngine(Definitions::weightedWorkflow());
