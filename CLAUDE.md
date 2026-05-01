@@ -104,18 +104,26 @@ composer install
 - **release-please** automates version bumps and `CHANGELOG.md` (config: `release-please-config.json`, manifest: `.release-please-manifest.json`, release-type: `simple`)
 - **CI** (`ci.yaml`): matrix tests on push/PR to `main` (PHP 8.2/8.3/8.4 x Laravel 11/12)
 - **Release** (`release-please.yaml`): triggered by `workflow_run` of CI on `main`. release-please reads the manifest vs git tags; if the manifest is ahead, it cuts the GitHub release + tag. Otherwise it opens/updates the Release PR.
-- **Auto-merge** (`auto-merge.yaml`): squash-merges the release-please PR (and patch/minor dependabot PRs) once checks pass. **Uses `secrets.RELEASE_PAT`** — see note below.
+- **Auto-merge** (`auto-merge.yaml`): squash-merges the release-please PR (and patch/minor dependabot PRs) once checks pass. **Uses a GitHub App installation token** — see note below.
 - **Packagist** auto-syncs from GitHub via webhook (configured on packagist.org, not in this repo)
 
-### Required secret: `RELEASE_PAT`
+### Required GitHub App: `APP_ID` + `APP_PRIVATE_KEY`
 
-The auto-merge workflow needs a fine-grained Personal Access Token because pushes made by the default `GITHUB_TOKEN` are intentionally suppressed from triggering further workflows (anti-recursion safety). Without a PAT, the squash-merge of a release-please PR lands on `main` silently and `release-please.yaml` never fires, so the GitHub release/tag is never created.
+The auto-merge workflow needs a non-`GITHUB_TOKEN` identity because pushes made by `GITHUB_TOKEN` are intentionally suppressed from triggering further workflows (anti-recursion safety). Without it, the squash-merge of a release-please PR lands on `main` silently and `release-please.yaml` never fires, so the GitHub release/tag is never created.
+
+The workflow mints a short-lived (1 hour) installation token via `actions/create-github-app-token@v2`, scoped to the app's configured permissions on this repo.
 
 Setup (one-time):
-1. Create a fine-grained PAT scoped to this repo with `Contents: Read and write` and `Pull requests: Read and write`.
-2. Add it under repo Settings -> Secrets and variables -> Actions as `RELEASE_PAT`.
+1. Create a GitHub App: Settings -> Developer settings -> GitHub Apps -> New GitHub App
+   - Repository permissions: `Contents` Read and write, `Pull requests` Read and write
+   - Webhook: disable (uncheck Active)
+2. On the app's settings page, generate a private key (downloads a `.pem` file).
+3. Install the app on this repo (App page -> Install App -> select `vandetho/symflow-laravel`).
+4. In this repo's Settings -> Secrets and variables -> Actions:
+   - Variable `APP_ID` = numeric app ID (from the app's About page)
+   - Secret `APP_PRIVATE_KEY` = full contents of the `.pem` file
 
-If the secret is missing, `gh pr merge --auto` in the workflow will fail loudly — better than the silent no-op of GITHUB_TOKEN.
+GitHub App tokens are preferred over PATs because they don't expire, aren't tied to a personal account, and produce signed commits.
 
 ---
 
