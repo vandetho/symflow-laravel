@@ -14,8 +14,11 @@ use Laraflow\Data\SubjectMiddlewareContext;
 use Laraflow\Data\Transition;
 use Laraflow\Data\TransitionResult;
 use Laraflow\Data\WorkflowDefinition;
+use Laraflow\Data\WorkflowEvent;
 use Laraflow\Engine\WorkflowEngine;
+use Laraflow\Enums\ListenerErrorMode;
 use Laraflow\Enums\WorkflowEventType;
+use Throwable;
 
 class Workflow
 {
@@ -25,16 +28,26 @@ class Workflow
     /** @var array<callable> */
     private array $subjectMiddleware;
 
+    private readonly ?ListenerErrorMode $listenerErrorMode;
+
+    /** @var ?callable(Throwable, WorkflowEvent): void */
+    private $onListenerError;
+
     /**
      * @param  array<callable>  $middleware
+     * @param  ?callable(Throwable, WorkflowEvent): void  $onListenerError
      */
     public function __construct(
         public readonly WorkflowDefinition $definition,
         private readonly MarkingStoreInterface $markingStore,
         private readonly ?GuardEvaluatorInterface $guardEvaluator = null,
         array $middleware = [],
+        ?ListenerErrorMode $listenerErrorMode = null,
+        ?callable $onListenerError = null,
     ) {
         $this->subjectMiddleware = $middleware;
+        $this->listenerErrorMode = $listenerErrorMode;
+        $this->onListenerError = $onListenerError;
     }
 
     public function use(callable $middleware): void
@@ -137,6 +150,8 @@ class Workflow
         $engine = new WorkflowEngine(
             definition: $this->definition,
             guardEvaluator: $guardEvaluator,
+            listenerErrorMode: $this->listenerErrorMode,
+            onListenerError: $this->onListenerError,
         );
 
         $engine->setMarking($this->markingStore->read($subject));

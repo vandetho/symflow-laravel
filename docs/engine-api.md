@@ -70,8 +70,26 @@ $engine = new WorkflowEngine(
             return $next();
         },
     ],
+    listenerErrorMode: ListenerErrorMode::Collect, // see "Listener errors" below
+    onListenerError: fn (\Throwable $e, WorkflowEvent $event) => report($e),
 );
 ```
+
+### Listener errors
+
+By default a throwing event listener bubbles up and aborts `apply()` mid-transition,
+which can leave the marking inconsistent (tokens removed from the source place but
+not yet added to the target). Choose a `ListenerErrorMode` to control this:
+
+| Mode | Behavior |
+|------|----------|
+| `Throw` (default) | Rethrow the first listener exception immediately. Backwards compatible. |
+| `Collect` | Catch listener exceptions, complete the transition (marking is fully written), then throw a `ListenerExceptionAggregate` exposing every collected `\Throwable` via `getExceptions()`. |
+| `Swallow` | Catch listener exceptions and pass them to `onListenerError($throwable, $event)` (or silently ignore if no callback). The transition completes normally. |
+
+Subsequent listeners always run in `Collect` and `Swallow` modes — one bad listener
+does not silence the rest. Middleware exceptions are not caught: middleware is the
+caller's escape hatch and any throw there still aborts the transition.
 
 ## Guards
 

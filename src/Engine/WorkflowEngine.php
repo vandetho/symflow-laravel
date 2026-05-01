@@ -14,7 +14,10 @@ use Laraflow\Data\TransitionBlocker;
 use Laraflow\Data\TransitionResult;
 use Laraflow\Data\WorkflowDefinition;
 use Laraflow\Data\WorkflowEvent;
+use Laraflow\Enums\ListenerErrorMode;
 use Laraflow\Enums\WorkflowEventType;
+use Laraflow\Exceptions\ListenerExceptionAggregate;
+use Throwable;
 
 class WorkflowEngine
 {
@@ -29,15 +32,30 @@ class WorkflowEngine
     /** @var array<callable> */
     private array $middleware;
 
+    private readonly ListenerErrorMode $listenerErrorMode;
+
+    /** @var ?Closure(Throwable, WorkflowEvent): void */
+    private readonly ?Closure $onListenerError;
+
+    /** @var array<Throwable> */
+    private array $collectedExceptions = [];
+
     /**
      * @param  array<callable>  $middleware
+     * @param  ?callable(Throwable, WorkflowEvent): void  $onListenerError
      */
     public function __construct(
         private readonly WorkflowDefinition $definition,
         private readonly ?GuardEvaluatorInterface $guardEvaluator = null,
         array $middleware = [],
+        ?ListenerErrorMode $listenerErrorMode = null,
+        ?callable $onListenerError = null,
     ) {
         $this->middleware = $middleware;
+        $this->listenerErrorMode = $listenerErrorMode ?? ListenerErrorMode::Throw;
+        $this->onListenerError = $onListenerError !== null
+            ? Closure::fromCallable($onListenerError)
+            : null;
         $this->placeNames = array_flip(array_map(fn ($p) => $p->name, $definition->places));
         $this->marking = $this->buildInitialMarking();
     }
@@ -178,24 +196,35 @@ class WorkflowEngine
         $transition = $this->findTransition($transitionName);
         assert($transition !== null);
 
+        $this->collectedExceptions = [];
+
         if (count($this->middleware) === 0) {
-            return $this->applyCore($transition);
+            $marking = $this->applyCore($transition);
+        } else {
+            $context = new MiddlewareContext(
+                definition: $this->definition,
+                transition: $transition,
+                marking: $this->getMarking(),
+                workflowName: $this->definition->name,
+            );
+
+            $chain = array_reduce(
+                array_reverse($this->middleware),
+                fn (Closure $next, callable $mw): Closure => fn (): Marking => $mw($context, $next),
+                fn (): Marking => $this->applyCore($transition),
+            );
+
+            $marking = $chain();
         }
 
-        $context = new MiddlewareContext(
-            definition: $this->definition,
-            transition: $transition,
-            marking: $this->getMarking(),
-            workflowName: $this->definition->name,
-        );
+        if (count($this->collectedExceptions) > 0) {
+            $exceptions = $this->collectedExceptions;
+            $this->collectedExceptions = [];
 
-        $chain = array_reduce(
-            array_reverse($this->middleware),
-            fn (Closure $next, callable $mw): Closure => fn (): Marking => $mw($context, $next),
-            fn (): Marking => $this->applyCore($transition),
-        );
+            throw new ListenerExceptionAggregate($exceptions);
+        }
 
-        return $chain();
+        return $marking;
     }
 
     public function reset(): void
@@ -274,7 +303,17 @@ class WorkflowEngine
         );
 
         foreach ($this->listeners[$type->value] ?? [] as $listener) {
-            $listener($event);
+            try {
+                $listener($event);
+            } catch (Throwable $e) {
+                match ($this->listenerErrorMode) {
+                    ListenerErrorMode::Throw => throw $e,
+                    ListenerErrorMode::Collect => $this->collectedExceptions[] = $e,
+                    ListenerErrorMode::Swallow => $this->onListenerError !== null
+                        ? ($this->onListenerError)($e, $event)
+                        : null,
+                };
+            }
         }
     }
 

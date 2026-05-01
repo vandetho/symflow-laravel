@@ -8,6 +8,9 @@ use Laraflow\Data\Marking;
 use Laraflow\Data\Transition;
 use Laraflow\Data\WorkflowEvent;
 use Laraflow\Engine\WorkflowEngine;
+use Laraflow\Enums\ListenerErrorMode;
+use Laraflow\Enums\WorkflowEventType;
+use Laraflow\Exceptions\ListenerExceptionAggregate;
 use Laraflow\Tests\Fixtures\Definitions;
 
 // --- State Machine ---
@@ -255,6 +258,126 @@ test('events: unsubscribe removes listener', function () {
     $unsub();
     $engine->apply('submit');
     expect($called)->toBeFalse();
+});
+
+// --- Listener error containment ---
+
+test('listener errors: Throw mode rethrows (default behavior)', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $engine->on(WorkflowEventType::Enter, function () {
+        throw new \RuntimeException('boom');
+    });
+
+    expect(fn () => $engine->apply('submit'))
+        ->toThrow(\RuntimeException::class, 'boom');
+});
+
+test('listener errors: Throw mode leaves marking inconsistent (regression-doc)', function () {
+    // This test documents the bug that motivates the Collect/Swallow modes:
+    // when a listener throws between Leave and the marking-set, tokens are
+    // already removed from the source place but never added to the target.
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $engine->on(WorkflowEventType::Enter, function () {
+        throw new \RuntimeException('boom');
+    });
+
+    try {
+        $engine->apply('submit');
+    } catch (\RuntimeException) {
+        // expected
+    }
+
+    $marking = $engine->getMarking();
+    expect($marking->get('draft'))->toBe(0);     // token removed
+    expect($marking->get('submitted'))->toBe(0); // token never added
+});
+
+test('listener errors: Collect mode completes the transition then throws aggregate', function () {
+    $engine = new WorkflowEngine(
+        definition: Definitions::orderStateMachine(),
+        listenerErrorMode: ListenerErrorMode::Collect,
+    );
+    $engine->on(WorkflowEventType::Enter, function () {
+        throw new \RuntimeException('first');
+    });
+    $engine->on(WorkflowEventType::Entered, function () {
+        throw new \RuntimeException('second');
+    });
+
+    try {
+        $engine->apply('submit');
+        $thrown = null;
+    } catch (ListenerExceptionAggregate $e) {
+        $thrown = $e;
+    }
+
+    expect($thrown)->toBeInstanceOf(ListenerExceptionAggregate::class);
+    expect($thrown->getExceptions())->toHaveCount(2);
+    expect($thrown->getExceptions()[0]->getMessage())->toBe('first');
+    expect($thrown->getExceptions()[1]->getMessage())->toBe('second');
+
+    // Marking is consistent — token moved fully to 'submitted'.
+    $marking = $engine->getMarking();
+    expect($marking->get('draft'))->toBe(0);
+    expect($marking->get('submitted'))->toBe(1);
+});
+
+test('listener errors: Collect mode without exceptions does not throw', function () {
+    $engine = new WorkflowEngine(
+        definition: Definitions::orderStateMachine(),
+        listenerErrorMode: ListenerErrorMode::Collect,
+    );
+    $engine->on(WorkflowEventType::Enter, function () { /* no-op */ });
+
+    $marking = $engine->apply('submit');
+    expect($marking->get('submitted'))->toBe(1);
+});
+
+test('listener errors: Swallow mode invokes onListenerError and continues', function () {
+    $captured = [];
+    $engine = new WorkflowEngine(
+        definition: Definitions::orderStateMachine(),
+        listenerErrorMode: ListenerErrorMode::Swallow,
+        onListenerError: function (\Throwable $e, WorkflowEvent $event) use (&$captured) {
+            $captured[] = ['msg' => $e->getMessage(), 'type' => $event->type];
+        },
+    );
+    $engine->on(WorkflowEventType::Enter, function () {
+        throw new \RuntimeException('shh');
+    });
+
+    $marking = $engine->apply('submit');
+    expect($marking->get('submitted'))->toBe(1);
+    expect($captured)->toHaveCount(1);
+    expect($captured[0]['msg'])->toBe('shh');
+    expect($captured[0]['type'])->toBe(WorkflowEventType::Enter);
+});
+
+test('listener errors: Swallow mode without callback silently ignores', function () {
+    $engine = new WorkflowEngine(
+        definition: Definitions::orderStateMachine(),
+        listenerErrorMode: ListenerErrorMode::Swallow,
+    );
+    $engine->on(WorkflowEventType::Enter, function () {
+        throw new \RuntimeException('shh');
+    });
+
+    $marking = $engine->apply('submit');
+    expect($marking->get('submitted'))->toBe(1);
+});
+
+test('listener errors: subsequent listeners still run in Collect mode', function () {
+    $ran = [];
+    $engine = new WorkflowEngine(
+        definition: Definitions::orderStateMachine(),
+        listenerErrorMode: ListenerErrorMode::Collect,
+    );
+    $engine->on(WorkflowEventType::Enter, function () { throw new \RuntimeException('a'); });
+    $engine->on(WorkflowEventType::Enter, function () use (&$ran) { $ran[] = 'second'; });
+
+    try { $engine->apply('submit'); } catch (ListenerExceptionAggregate) {}
+
+    expect($ran)->toBe(['second']);
 });
 
 // --- Weighted Arcs ---
