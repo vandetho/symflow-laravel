@@ -8,7 +8,6 @@
 * **engine:** add ListenerErrorMode for listener error containment ([faba4ff](https://github.com/vandetho/symflow-laravel/commit/faba4ff58a9413b1a1603aacee23c500f011ff0d))
 * **engine:** add per-transition scoping and priority to on() ([d26e5a6](https://github.com/vandetho/symflow-laravel/commit/d26e5a68564e2954dc8516a58af918b64fea6c6d))
 * **engine:** allow guards to return structured GuardResult with reason/code ([fe6b603](https://github.com/vandetho/symflow-laravel/commit/fe6b6033abe11dba87722a4feea432b8e321dd38))
-* **engine:** listener errors, scoping/priority, blockable guard event ([ab1a806](https://github.com/vandetho/symflow-laravel/commit/ab1a80608898ffe15d290a77ed970a7c2670d9e8))
 * **engine:** make Guard event blockable from listeners ([ee75b4d](https://github.com/vandetho/symflow-laravel/commit/ee75b4dccb17d80cb842ce86ea92331594c644a6))
 
 
