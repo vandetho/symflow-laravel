@@ -6,6 +6,8 @@ namespace Laraflow\Engine;
 
 use Closure;
 use Laraflow\Contracts\GuardEvaluatorInterface;
+use Laraflow\Data\GuardEvent;
+use Laraflow\Data\GuardResult;
 use Laraflow\Data\Marking;
 use Laraflow\Data\MiddlewareContext;
 use Laraflow\Data\Transition;
@@ -13,7 +15,10 @@ use Laraflow\Data\TransitionBlocker;
 use Laraflow\Data\TransitionResult;
 use Laraflow\Data\WorkflowDefinition;
 use Laraflow\Data\WorkflowEvent;
+use Laraflow\Enums\ListenerErrorMode;
 use Laraflow\Enums\WorkflowEventType;
+use Laraflow\Exceptions\ListenerExceptionAggregate;
+use Throwable;
 
 class WorkflowEngine
 {
@@ -22,21 +27,38 @@ class WorkflowEngine
     /** @var array<string, bool> */
     private array $placeNames;
 
-    /** @var array<string, array<callable>> */
+    /** @var array<string, array<int, array{priority: int, scope: string, cb: callable, seq: int}>> */
     private array $listeners = [];
+
+    private int $listenerSeq = 0;
 
     /** @var array<callable> */
     private array $middleware;
 
+    private readonly ListenerErrorMode $listenerErrorMode;
+
+    /** @var ?Closure(Throwable, WorkflowEvent): void */
+    private readonly ?Closure $onListenerError;
+
+    /** @var array<Throwable> */
+    private array $collectedExceptions = [];
+
     /**
      * @param  array<callable>  $middleware
+     * @param  ?callable(Throwable, WorkflowEvent): void  $onListenerError
      */
     public function __construct(
         private readonly WorkflowDefinition $definition,
         private readonly ?GuardEvaluatorInterface $guardEvaluator = null,
         array $middleware = [],
+        ?ListenerErrorMode $listenerErrorMode = null,
+        ?callable $onListenerError = null,
     ) {
         $this->middleware = $middleware;
+        $this->listenerErrorMode = $listenerErrorMode ?? ListenerErrorMode::Throw;
+        $this->onListenerError = $onListenerError !== null
+            ? Closure::fromCallable($onListenerError)
+            : null;
         $this->placeNames = array_flip(array_map(fn ($p) => $p->name, $definition->places));
         $this->marking = $this->buildInitialMarking();
     }
@@ -139,20 +161,38 @@ class WorkflowEngine
         }
 
         if ($transition->guard !== null && $this->guardEvaluator !== null) {
-            $guardPassed = $this->guardEvaluator->evaluate(
+            $guardOutcome = $this->guardEvaluator->evaluate(
                 $transition->guard,
                 $this->getMarking(),
                 $transition,
             );
 
-            if (! $guardPassed) {
+            $guardResult = $guardOutcome instanceof GuardResult
+                ? $guardOutcome
+                : new GuardResult(allowed: $guardOutcome);
+
+            if (! $guardResult->allowed) {
                 $blockers[] = new TransitionBlocker(
-                    code: 'guard_blocked',
-                    message: "Guard \"{$transition->guard}\" blocked the transition",
+                    code: $guardResult->code ?? 'guard_blocked',
+                    message: $guardResult->reason ?? "Guard \"{$transition->guard}\" blocked the transition",
                 );
 
                 return new TransitionResult(allowed: false, blockers: $blockers);
             }
+        }
+
+        // Guard event — listeners may call $event->block(reason, code) to veto
+        // the transition. Note this fires during can() (and therefore during
+        // getEnabledTransitions()), so listeners should be idempotent.
+        $guardEvent = $this->emitGuard($transition);
+
+        if ($guardEvent->isBlocked()) {
+            $blockers[] = new TransitionBlocker(
+                code: $guardEvent->getBlockedCode() ?? 'guard_blocked',
+                message: $guardEvent->getBlockedReason() ?? "Guard event blocked transition \"{$transition->name}\"",
+            );
+
+            return new TransitionResult(allowed: false, blockers: $blockers);
         }
 
         return new TransitionResult(allowed: true);
@@ -173,24 +213,35 @@ class WorkflowEngine
         $transition = $this->findTransition($transitionName);
         assert($transition !== null);
 
+        $this->collectedExceptions = [];
+
         if (count($this->middleware) === 0) {
-            return $this->applyCore($transition);
+            $marking = $this->applyCore($transition);
+        } else {
+            $context = new MiddlewareContext(
+                definition: $this->definition,
+                transition: $transition,
+                marking: $this->getMarking(),
+                workflowName: $this->definition->name,
+            );
+
+            $chain = array_reduce(
+                array_reverse($this->middleware),
+                fn (Closure $next, callable $mw): Closure => fn (): Marking => $mw($context, $next),
+                fn (): Marking => $this->applyCore($transition),
+            );
+
+            $marking = $chain();
         }
 
-        $context = new MiddlewareContext(
-            definition: $this->definition,
-            transition: $transition,
-            marking: $this->getMarking(),
-            workflowName: $this->definition->name,
-        );
+        if (count($this->collectedExceptions) > 0) {
+            $exceptions = $this->collectedExceptions;
+            $this->collectedExceptions = [];
 
-        $chain = array_reduce(
-            array_reverse($this->middleware),
-            fn (Closure $next, callable $mw): Closure => fn (): Marking => $mw($context, $next),
-            fn (): Marking => $this->applyCore($transition),
-        );
+            throw new ListenerExceptionAggregate($exceptions);
+        }
 
-        return $chain();
+        return $marking;
     }
 
     public function reset(): void
@@ -198,24 +249,38 @@ class WorkflowEngine
         $this->marking = $this->buildInitialMarking();
     }
 
-    public function on(WorkflowEventType $type, callable $listener): Closure
-    {
+    /**
+     * Register a listener.
+     *
+     * @param  ?string  $transitionName  Restrict to one transition; null = wildcard (all transitions)
+     * @param  int  $priority  Higher fires first; ties preserve registration order
+     */
+    public function on(
+        WorkflowEventType $type,
+        callable $listener,
+        ?string $transitionName = null,
+        int $priority = 0,
+    ): Closure {
         $key = $type->value;
         $this->listeners[$key] ??= [];
-        $this->listeners[$key][] = $listener;
+        $this->listeners[$key][] = [
+            'priority' => $priority,
+            'scope' => $transitionName ?? '*',
+            'cb' => $listener,
+            'seq' => $this->listenerSeq++,
+        ];
 
         return function () use ($key, $listener): void {
             $this->listeners[$key] = array_values(array_filter(
                 $this->listeners[$key] ?? [],
-                fn (callable $l): bool => $l !== $listener,
+                fn (array $entry): bool => $entry['cb'] !== $listener,
             ));
         };
     }
 
     private function applyCore(Transition $transition): Marking
     {
-        // 1. Guard event
-        $this->emit(WorkflowEventType::Guard, $transition);
+        // Guard event already fired during can() — do not re-emit here.
 
         // 2. Leave — fire per from-place, then remove tokens
         for ($i = 0; $i < count($transition->froms); $i++) {
@@ -268,8 +333,54 @@ class WorkflowEngine
             workflowName: $this->definition->name,
         );
 
-        foreach ($this->listeners[$type->value] ?? [] as $listener) {
-            $listener($event);
+        $this->dispatchToListeners($event);
+    }
+
+    private function emitGuard(Transition $transition): GuardEvent
+    {
+        $event = new GuardEvent(
+            type: WorkflowEventType::Guard,
+            transition: $transition,
+            marking: $this->getMarking(),
+            workflowName: $this->definition->name,
+        );
+
+        $this->dispatchToListeners($event);
+
+        return $event;
+    }
+
+    private function dispatchToListeners(WorkflowEvent $event): void
+    {
+        $candidates = array_filter(
+            $this->listeners[$event->type->value] ?? [],
+            fn (array $entry): bool => $entry['scope'] === '*' || $entry['scope'] === $event->transition->name,
+        );
+
+        if ($candidates === []) {
+            return;
+        }
+
+        usort($candidates, function (array $a, array $b): int {
+            if ($a['priority'] !== $b['priority']) {
+                return $b['priority'] <=> $a['priority']; // higher priority first
+            }
+
+            return $a['seq'] <=> $b['seq']; // FIFO within same priority
+        });
+
+        foreach ($candidates as $entry) {
+            try {
+                ($entry['cb'])($event);
+            } catch (Throwable $e) {
+                match ($this->listenerErrorMode) {
+                    ListenerErrorMode::Throw => throw $e,
+                    ListenerErrorMode::Collect => $this->collectedExceptions[] = $e,
+                    ListenerErrorMode::Swallow => $this->onListenerError !== null
+                        ? ($this->onListenerError)($e, $event)
+                        : null,
+                };
+            }
         }
     }
 

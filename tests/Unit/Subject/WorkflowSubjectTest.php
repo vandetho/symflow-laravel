@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Laraflow\Data\Marking;
 use Laraflow\Data\SubjectEvent;
+use Laraflow\Data\SubjectGuardEvent;
 use Laraflow\Enums\WorkflowEventType;
 use Laraflow\Subject\PropertyMarkingStore;
 use Laraflow\Subject\Workflow;
@@ -55,6 +56,108 @@ test('events include subject', function () {
 
     $workflow->apply($order, 'submit');
     expect($receivedSubject)->toBe($order);
+});
+
+test('subject guard event: listener can block based on subject state', function () {
+    $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
+    $order = new stdClass();
+    $order->status = 'draft';
+    $order->customerHasOverdueInvoice = true;
+
+    $workflow->on(WorkflowEventType::Guard, function (SubjectGuardEvent $event) {
+        if ($event->subject->customerHasOverdueInvoice) {
+            $event->block('Customer has overdue invoices', 'overdue_invoices');
+        }
+    });
+
+    $result = $workflow->can($order, 'submit');
+
+    expect($result->allowed)->toBeFalse();
+    expect($result->blockers[0]->code)->toBe('overdue_invoices');
+    expect($result->blockers[0]->message)->toBe('Customer has overdue invoices');
+});
+
+test('subject guard event: getEnabledTransitions reflects subject-side blocking', function () {
+    $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
+    $order = new stdClass();
+    $order->status = 'draft';
+    $order->isFrozen = true;
+
+    $workflow->on(WorkflowEventType::Guard, function (SubjectGuardEvent $event) {
+        if ($event->subject->isFrozen) {
+            $event->block('account frozen');
+        }
+    });
+
+    expect($workflow->getEnabledTransitions($order))->toBe([]);
+});
+
+test('subject guard event: later listener can observe a prior listener\'s block', function () {
+    $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
+    $order = new stdClass();
+    $order->status = 'draft';
+
+    $observed = null;
+
+    $workflow->on(WorkflowEventType::Guard, function (SubjectGuardEvent $event) {
+        $event->block('first', 'first_code');
+    }, priority: 100); // fires first
+
+    $workflow->on(WorkflowEventType::Guard, function (SubjectGuardEvent $event) use (&$observed) {
+        $observed = [
+            'isBlocked' => $event->isBlocked(),
+            'reason' => $event->getBlockedReason(),
+            'code' => $event->getBlockedCode(),
+        ];
+    }, priority: 50); // fires second — must see the prior block
+
+    $workflow->can($order, 'submit');
+
+    expect($observed)->toBe([
+        'isBlocked' => true,
+        'reason' => 'first',
+        'code' => 'first_code',
+    ]);
+});
+
+test('subject guard event: apply throws when blocked', function () {
+    $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
+    $order = new stdClass();
+    $order->status = 'draft';
+
+    $workflow->on(WorkflowEventType::Guard, function (SubjectGuardEvent $event) {
+        $event->block('subject says no');
+    });
+
+    expect(fn () => $workflow->apply($order, 'submit'))
+        ->toThrow(\RuntimeException::class, 'subject says no');
+});
+
+test('subject listener: scope and priority forward to engine', function () {
+    $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
+    $order = new stdClass();
+    $order->status = 'draft';
+
+    $calls = [];
+
+    // wildcard low priority
+    $workflow->on(WorkflowEventType::Entered, function (SubjectEvent $e) use (&$calls) {
+        $calls[] = 'wild';
+    }, priority: 1);
+
+    // scoped high priority — must fire first when transition matches
+    $workflow->on(WorkflowEventType::Entered, function (SubjectEvent $e) use (&$calls) {
+        $calls[] = 'scoped-submit';
+    }, transitionName: 'submit', priority: 100);
+
+    // scoped to a different transition — must NOT fire on submit
+    $workflow->on(WorkflowEventType::Entered, function (SubjectEvent $e) use (&$calls) {
+        $calls[] = 'scoped-approve';
+    }, transitionName: 'approve');
+
+    $workflow->apply($order, 'submit');
+
+    expect($calls)->toBe(['scoped-submit', 'wild']);
 });
 
 test('full flow through subject', function () {

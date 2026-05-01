@@ -42,7 +42,7 @@ $engine = new WorkflowEngine($definition);
 | `apply(string)` | `Marking` | Fire a transition (throws if blocked) |
 | `use(callable)` | `void` | Register a middleware |
 | `reset()` | `void` | Reset to initial marking |
-| `on(WorkflowEventType, callable)` | `Closure` | Subscribe to events (returns unsubscribe) |
+| `on(WorkflowEventType, callable, ?string $transitionName = null, int $priority = 0)` | `Closure` | Subscribe to events (returns unsubscribe). Optional transition scope and priority — see "Listener scoping & priority" below. |
 | `getDefinition()` | `WorkflowDefinition` | The underlying definition |
 
 ### TransitionResult
@@ -70,8 +70,61 @@ $engine = new WorkflowEngine(
             return $next();
         },
     ],
+    listenerErrorMode: ListenerErrorMode::Collect, // see "Listener errors" below
+    onListenerError: fn (\Throwable $e, WorkflowEvent $event) => report($e),
 );
 ```
+
+### Listener scoping & priority
+
+`on()` accepts two optional arguments to keep listener registration declarative
+instead of forcing every callback to start with
+`if ($event->transition->name === '…')`:
+
+```php
+// Wildcard listener — fires for every transition (priority 0).
+$engine->on(WorkflowEventType::Entered, fn ($e) => Audit::log($e));
+
+// Scoped listener — fires only when the 'paid' transition completes.
+$engine->on(
+    WorkflowEventType::Enter,
+    fn ($e) => Inventory::deduct($e),
+    transitionName: 'paid',
+    priority: 100, // higher = earlier
+);
+
+// Lower priority — runs after the inventory deduction above.
+$engine->on(
+    WorkflowEventType::Enter,
+    fn ($e) => Slack::notifyWarehouse($e),
+    transitionName: 'paid',
+    priority: 50,
+);
+```
+
+**Dispatch order:** higher `$priority` fires first; ties preserve registration
+order (FIFO across both wildcard and scoped registrations). Wildcard and
+scoped listeners interleave by priority globally — there is no implicit
+"wildcard always before scoped" rule.
+
+`Subject\Workflow::on()` accepts the same arguments and forwards them to the
+underlying engine.
+
+### Listener errors
+
+By default a throwing event listener bubbles up and aborts `apply()` mid-transition,
+which can leave the marking inconsistent (tokens removed from the source place but
+not yet added to the target). Choose a `ListenerErrorMode` to control this:
+
+| Mode | Behavior |
+|------|----------|
+| `Throw` (default) | Rethrow the first listener exception immediately. Backwards compatible. |
+| `Collect` | Catch listener exceptions, complete the transition (marking is fully written), then throw a `ListenerExceptionAggregate` exposing every collected `\Throwable` via `getExceptions()`. |
+| `Swallow` | Catch listener exceptions and pass them to `onListenerError($throwable, $event)` (or silently ignore if no callback). The transition completes normally. |
+
+Subsequent listeners always run in `Collect` and `Swallow` modes — one bad listener
+does not silence the rest. Middleware exceptions are not caught: middleware is the
+caller's escape hatch and any throw there still aborts the transition.
 
 ## Guards
 
@@ -79,14 +132,15 @@ Implement `GuardEvaluatorInterface` to control transition access:
 
 ```php
 use Laraflow\Contracts\GuardEvaluatorInterface;
+use Laraflow\Data\GuardResult;
 use Laraflow\Data\Marking;
 use Laraflow\Data\Transition;
 
 class MyGuardEvaluator implements GuardEvaluatorInterface
 {
-    public function evaluate(string $expression, Marking $marking, Transition $transition): bool
+    public function evaluate(string $expression, Marking $marking, Transition $transition): bool|GuardResult
     {
-        // Parse $expression and return true to allow, false to block
+        // Return a plain bool for simple allow/deny...
         return match ($expression) {
             'is_admin' => auth()->user()?->isAdmin() ?? false,
             default => true,
@@ -94,6 +148,21 @@ class MyGuardEvaluator implements GuardEvaluatorInterface
     }
 }
 ```
+
+Return a `GuardResult` when you want the failure reason to flow into the `TransitionBlocker` (so the UI/API can show it without inspecting the guard expression):
+
+```php
+public function evaluate(string $expression, Marking $marking, Transition $transition): bool|GuardResult
+{
+    if ($expression === 'is_admin' && ! auth()->user()?->isAdmin()) {
+        return GuardResult::deny('You must be an admin to approve.', 'not_admin');
+    }
+
+    return GuardResult::allow();
+}
+```
+
+When the guard returns `GuardResult::deny($reason, $code)`, the blocker uses `$code` (or `'guard_blocked'` if omitted) and `$reason` as its message. A plain `false` falls back to the legacy `guard_blocked` code with the expression in the message.
 
 Add guards to transitions:
 
@@ -105,6 +174,36 @@ new Transition(
     guard: 'is_admin',
 ),
 ```
+
+### Blocking from a Guard event listener
+
+Some rules don't fit a single guard expression on a transition — for example,
+*"can't ship this order if the customer has overdue invoices on a different
+order"*. Such cross-aggregate checks belong in a Guard event listener, which
+can call `block(reason, ?code)` on the dispatched `GuardEvent`:
+
+```php
+use Laraflow\Data\GuardEvent;
+
+$engine->on(WorkflowEventType::Guard, function (GuardEvent $event) {
+    if ($event->transition->name === 'ship'
+        && Customer::hasOverdueInvoices($event->workflowName)) {
+        $event->block('Customer has overdue invoices', 'overdue_invoices');
+    }
+});
+```
+
+A blocked Guard event becomes a `TransitionBlocker` in the `TransitionResult`
+(using the supplied `code` and `reason`, falling back to `guard_blocked` when
+`code` is omitted). `Subject\Workflow` listeners receive a `SubjectGuardEvent`
+with the same `block()` API plus the resolved `$subject`.
+
+> **Behavior change as of 1.x.** Guard events now fire during `can()` (and
+> therefore during `getEnabledTransitions()`), not only during `apply()`.
+> Listeners must be **idempotent and side-effect-free** — they will be
+> invoked multiple times per request whenever the host calls `can()` or
+> enumerates available transitions. The `GuardEvaluator` is still consulted
+> first; an evaluator denial short-circuits before the event fires.
 
 ## Validation
 

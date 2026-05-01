@@ -6,14 +6,14 @@ namespace Laraflow\Data;
 
 use Laraflow\Enums\WorkflowEventType;
 
-final readonly class SubjectEvent extends WorkflowEvent
+class SubjectEvent extends WorkflowEvent
 {
     public function __construct(
         WorkflowEventType $type,
         Transition $transition,
         Marking $marking,
         string $workflowName,
-        public object $subject,
+        public readonly object $subject,
     ) {
         parent::__construct($type, $transition, $marking, $workflowName);
     }
