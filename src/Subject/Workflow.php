@@ -7,9 +7,11 @@ namespace Laraflow\Subject;
 use Closure;
 use Laraflow\Contracts\GuardEvaluatorInterface;
 use Laraflow\Contracts\MarkingStoreInterface;
+use Laraflow\Data\GuardEvent;
 use Laraflow\Data\Marking;
 use Laraflow\Data\MiddlewareContext;
 use Laraflow\Data\SubjectEvent;
+use Laraflow\Data\SubjectGuardEvent;
 use Laraflow\Data\SubjectMiddlewareContext;
 use Laraflow\Data\Transition;
 use Laraflow\Data\TransitionResult;
@@ -70,12 +72,18 @@ class Workflow
      */
     public function getEnabledTransitions(object $subject): array
     {
-        return $this->buildEngine($subject)->getEnabledTransitions();
+        $engine = $this->buildEngine($subject);
+        $this->attachSubjectListeners($engine, $subject);
+
+        return $engine->getEnabledTransitions();
     }
 
     public function can(object $subject, string $transitionName): TransitionResult
     {
-        return $this->buildEngine($subject)->can($transitionName);
+        $engine = $this->buildEngine($subject);
+        $this->attachSubjectListeners($engine, $subject);
+
+        return $engine->can($transitionName);
     }
 
     public function apply(object $subject, string $transitionName): Marking
@@ -97,42 +105,64 @@ class Workflow
             });
         }
 
-        // Forward events with subject — register each listener individually
-        // so scope and priority are preserved at the engine level.
-        $unsubscribers = [];
+        $this->attachSubjectListeners($engine, $subject);
 
+        $newMarking = $engine->apply($transitionName);
+        $this->markingStore->write($subject, $newMarking);
+
+        return $newMarking;
+    }
+
+    private function attachSubjectListeners(WorkflowEngine $engine, object $subject): void
+    {
         foreach ($this->listeners as $typeValue => $typeListeners) {
             $eventType = WorkflowEventType::from($typeValue);
             foreach ($typeListeners as $entry) {
                 $listener = $entry['cb'];
-                $unsubscribers[] = $engine->on(
+                $engine->on(
                     $eventType,
-                    function (WorkflowEvent $event) use ($listener, $subject): void {
-                        $subjectEvent = new SubjectEvent(
-                            type: $event->type,
-                            transition: $event->transition,
-                            marking: $event->marking,
-                            workflowName: $event->workflowName,
-                            subject: $subject,
-                        );
-                        $listener($subjectEvent);
-                    },
+                    $this->wrapSubjectListener($listener, $subject),
                     $entry['scope'] === '*' ? null : $entry['scope'],
                     $entry['priority'],
                 );
             }
         }
+    }
 
-        try {
-            $newMarking = $engine->apply($transitionName);
-            $this->markingStore->write($subject, $newMarking);
+    private function wrapSubjectListener(callable $listener, object $subject): Closure
+    {
+        return function (WorkflowEvent $event) use ($listener, $subject): void {
+            if ($event instanceof GuardEvent) {
+                $subjectEvent = new SubjectGuardEvent(
+                    type: $event->type,
+                    transition: $event->transition,
+                    marking: $event->marking,
+                    workflowName: $event->workflowName,
+                    subject: $subject,
+                );
 
-            return $newMarking;
-        } finally {
-            foreach ($unsubscribers as $unsub) {
-                $unsub();
+                $listener($subjectEvent);
+
+                if ($subjectEvent->isBlocked()) {
+                    $event->block(
+                        $subjectEvent->getBlockedReason() ?? '',
+                        $subjectEvent->getBlockedCode(),
+                    );
+                }
+
+                return;
             }
-        }
+
+            $subjectEvent = new SubjectEvent(
+                type: $event->type,
+                transition: $event->transition,
+                marking: $event->marking,
+                workflowName: $event->workflowName,
+                subject: $subject,
+            );
+
+            $listener($subjectEvent);
+        };
     }
 
     /**

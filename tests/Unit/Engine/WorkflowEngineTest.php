@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Laraflow\Contracts\GuardEvaluatorInterface;
+use Laraflow\Data\GuardEvent;
 use Laraflow\Data\GuardResult;
 use Laraflow\Data\Marking;
 use Laraflow\Data\Transition;
@@ -462,6 +463,135 @@ test('listener scope: unsubscribe removes listener regardless of scope/priority'
     $engine->apply('submit');
 
     expect($calls)->toBe([]);
+});
+
+// --- Blockable Guard event ---
+
+test('guard event: listener can block transition with reason and code', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $engine->on(WorkflowEventType::Guard, function (GuardEvent $event) {
+        $event->block('Customer has overdue invoices', 'overdue_invoices');
+    });
+
+    $result = $engine->can('submit');
+
+    expect($result->allowed)->toBeFalse();
+    expect($result->blockers[0]->code)->toBe('overdue_invoices');
+    expect($result->blockers[0]->message)->toBe('Customer has overdue invoices');
+});
+
+test('guard event: block reason without code falls back to guard_blocked', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $engine->on(WorkflowEventType::Guard, function (GuardEvent $event) {
+        $event->block('Outside business hours');
+    });
+
+    $result = $engine->can('submit');
+
+    expect($result->allowed)->toBeFalse();
+    expect($result->blockers[0]->code)->toBe('guard_blocked');
+    expect($result->blockers[0]->message)->toBe('Outside business hours');
+});
+
+test('guard event: non-blocking listener still observes (BC)', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $observed = [];
+    $engine->on(WorkflowEventType::Guard, function (WorkflowEvent $event) use (&$observed) {
+        $observed[] = $event->transition->name;
+    });
+
+    expect($engine->can('submit')->allowed)->toBeTrue();
+    expect($observed)->toBe(['submit']);
+});
+
+test('guard event: apply() throws when a guard listener blocks', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $engine->on(WorkflowEventType::Guard, function (GuardEvent $event) {
+        $event->block('nope', 'denied');
+    });
+
+    expect(fn () => $engine->apply('submit'))
+        ->toThrow(\RuntimeException::class, 'nope');
+});
+
+test('guard event: getEnabledTransitions respects blocking listeners', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $engine->on(WorkflowEventType::Guard, function (GuardEvent $event) {
+        if ($event->transition->name === 'submit') {
+            $event->block('blocked');
+        }
+    });
+
+    expect($engine->getEnabledTransitions())->toBe([]);
+});
+
+test('guard event: when multiple listeners block, last writer wins', function () {
+    // Documented contract: block() simply overwrites prior block state.
+    // Listeners with conflicting reasons should not be relied on for
+    // ordering — use priority + a single source of truth.
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $engine->on(WorkflowEventType::Guard, function (GuardEvent $event) {
+        $event->block('first', 'first_code');
+    }, priority: 100); // fires first
+    $engine->on(WorkflowEventType::Guard, function (GuardEvent $event) {
+        $event->block('second', 'second_code');
+    }, priority: 50); // fires after, overwrites
+
+    $result = $engine->can('submit');
+
+    expect($result->blockers[0]->code)->toBe('second_code');
+    expect($result->blockers[0]->message)->toBe('second');
+});
+
+test('guard event: GuardEvaluator denial short-circuits before event fires', function () {
+    $evaluator = new class implements GuardEvaluatorInterface {
+        public function evaluate(string $expression, Marking $marking, Transition $transition): bool
+        {
+            return false;
+        }
+    };
+    $engine = new WorkflowEngine(Definitions::guardedStateMachine(), $evaluator);
+
+    $eventFired = false;
+    $engine->on(WorkflowEventType::Guard, function () use (&$eventFired) {
+        $eventFired = true;
+    });
+
+    $result = $engine->can('approve');
+
+    expect($result->allowed)->toBeFalse();
+    expect($result->blockers[0]->code)->toBe('guard_blocked');
+    expect($eventFired)->toBeFalse();
+});
+
+test('guard event: fires once when can() is called directly', function () {
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $count = 0;
+    $engine->on(WorkflowEventType::Guard, function () use (&$count) {
+        $count++;
+    }, transitionName: 'submit');
+
+    $engine->can('submit');
+
+    expect($count)->toBe(1);
+});
+
+test('guard event: also fires during getEnabledTransitions (idempotency required)', function () {
+    // Documented behavior: Guard listeners fire for every can() check, which
+    // includes the per-transition checks getEnabledTransitions() performs.
+    // Listeners must be idempotent and side-effect-free.
+    $engine = new WorkflowEngine(Definitions::orderStateMachine());
+    $checked = [];
+    $engine->on(WorkflowEventType::Guard, function (GuardEvent $event) use (&$checked) {
+        $checked[] = $event->transition->name;
+    });
+
+    $engine->getEnabledTransitions();
+
+    // Only 'submit' is structurally enabled from initial 'draft' state, so
+    // Guard fires only for it (other transitions are blocked earlier on
+    // place check before reaching the Guard event).
+    expect($checked)->toBe(['submit']);
 });
 
 test('weighted: can() returns false when marking < consumeWeight', function () {

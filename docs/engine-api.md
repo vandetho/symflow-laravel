@@ -175,6 +175,36 @@ new Transition(
 ),
 ```
 
+### Blocking from a Guard event listener
+
+Some rules don't fit a single guard expression on a transition — for example,
+*"can't ship this order if the customer has overdue invoices on a different
+order"*. Such cross-aggregate checks belong in a Guard event listener, which
+can call `block(reason, ?code)` on the dispatched `GuardEvent`:
+
+```php
+use Laraflow\Data\GuardEvent;
+
+$engine->on(WorkflowEventType::Guard, function (GuardEvent $event) {
+    if ($event->transition->name === 'ship'
+        && Customer::hasOverdueInvoices($event->workflowName)) {
+        $event->block('Customer has overdue invoices', 'overdue_invoices');
+    }
+});
+```
+
+A blocked Guard event becomes a `TransitionBlocker` in the `TransitionResult`
+(using the supplied `code` and `reason`, falling back to `guard_blocked` when
+`code` is omitted). `Subject\Workflow` listeners receive a `SubjectGuardEvent`
+with the same `block()` API plus the resolved `$subject`.
+
+> **Behavior change as of 1.x.** Guard events now fire during `can()` (and
+> therefore during `getEnabledTransitions()`), not only during `apply()`.
+> Listeners must be **idempotent and side-effect-free** — they will be
+> invoked multiple times per request whenever the host calls `can()` or
+> enumerates available transitions. The `GuardEvaluator` is still consulted
+> first; an evaluator denial short-circuits before the event fires.
+
 ## Validation
 
 Catch structural problems before creating an engine:

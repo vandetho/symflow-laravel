@@ -6,6 +6,7 @@ namespace Laraflow\Engine;
 
 use Closure;
 use Laraflow\Contracts\GuardEvaluatorInterface;
+use Laraflow\Data\GuardEvent;
 use Laraflow\Data\GuardResult;
 use Laraflow\Data\Marking;
 use Laraflow\Data\MiddlewareContext;
@@ -180,6 +181,20 @@ class WorkflowEngine
             }
         }
 
+        // Guard event — listeners may call $event->block(reason, code) to veto
+        // the transition. Note this fires during can() (and therefore during
+        // getEnabledTransitions()), so listeners should be idempotent.
+        $guardEvent = $this->emitGuard($transition);
+
+        if ($guardEvent->isBlocked()) {
+            $blockers[] = new TransitionBlocker(
+                code: $guardEvent->getBlockedCode() ?? 'guard_blocked',
+                message: $guardEvent->getBlockedReason() ?? "Guard event blocked transition \"{$transition->name}\"",
+            );
+
+            return new TransitionResult(allowed: false, blockers: $blockers);
+        }
+
         return new TransitionResult(allowed: true);
     }
 
@@ -265,8 +280,7 @@ class WorkflowEngine
 
     private function applyCore(Transition $transition): Marking
     {
-        // 1. Guard event
-        $this->emit(WorkflowEventType::Guard, $transition);
+        // Guard event already fired during can() — do not re-emit here.
 
         // 2. Leave — fire per from-place, then remove tokens
         for ($i = 0; $i < count($transition->froms); $i++) {
@@ -312,9 +326,35 @@ class WorkflowEngine
 
     private function emit(WorkflowEventType $type, Transition $transition): void
     {
+        $event = new WorkflowEvent(
+            type: $type,
+            transition: $transition,
+            marking: $this->getMarking(),
+            workflowName: $this->definition->name,
+        );
+
+        $this->dispatchToListeners($event);
+    }
+
+    private function emitGuard(Transition $transition): GuardEvent
+    {
+        $event = new GuardEvent(
+            type: WorkflowEventType::Guard,
+            transition: $transition,
+            marking: $this->getMarking(),
+            workflowName: $this->definition->name,
+        );
+
+        $this->dispatchToListeners($event);
+
+        return $event;
+    }
+
+    private function dispatchToListeners(WorkflowEvent $event): void
+    {
         $candidates = array_filter(
-            $this->listeners[$type->value] ?? [],
-            fn (array $entry): bool => $entry['scope'] === '*' || $entry['scope'] === $transition->name,
+            $this->listeners[$event->type->value] ?? [],
+            fn (array $entry): bool => $entry['scope'] === '*' || $entry['scope'] === $event->transition->name,
         );
 
         if ($candidates === []) {
@@ -328,13 +368,6 @@ class WorkflowEngine
 
             return $a['seq'] <=> $b['seq']; // FIFO within same priority
         });
-
-        $event = new WorkflowEvent(
-            type: $type,
-            transition: $transition,
-            marking: $this->getMarking(),
-            workflowName: $this->definition->name,
-        );
 
         foreach ($candidates as $entry) {
             try {

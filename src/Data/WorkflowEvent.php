@@ -6,12 +6,12 @@ namespace Laraflow\Data;
 
 use Laraflow\Enums\WorkflowEventType;
 
-readonly class WorkflowEvent
+class WorkflowEvent
 {
     public function __construct(
-        public WorkflowEventType $type,
-        public Transition $transition,
-        public Marking $marking,
-        public string $workflowName,
+        public readonly WorkflowEventType $type,
+        public readonly Transition $transition,
+        public readonly Marking $marking,
+        public readonly string $workflowName,
     ) {}
 }
