@@ -92,6 +92,34 @@ test('subject guard event: getEnabledTransitions reflects subject-side blocking'
     expect($workflow->getEnabledTransitions($order))->toBe([]);
 });
 
+test('subject guard event: later listener can observe a prior listener\'s block', function () {
+    $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
+    $order = new stdClass();
+    $order->status = 'draft';
+
+    $observed = null;
+
+    $workflow->on(WorkflowEventType::Guard, function (SubjectGuardEvent $event) {
+        $event->block('first', 'first_code');
+    }, priority: 100); // fires first
+
+    $workflow->on(WorkflowEventType::Guard, function (SubjectGuardEvent $event) use (&$observed) {
+        $observed = [
+            'isBlocked' => $event->isBlocked(),
+            'reason' => $event->getBlockedReason(),
+            'code' => $event->getBlockedCode(),
+        ];
+    }, priority: 50); // fires second — must see the prior block
+
+    $workflow->can($order, 'submit');
+
+    expect($observed)->toBe([
+        'isBlocked' => true,
+        'reason' => 'first',
+        'code' => 'first_code',
+    ]);
+});
+
 test('subject guard event: apply throws when blocked', function () {
     $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
     $order = new stdClass();
@@ -109,14 +137,6 @@ test('subject listener: scope and priority forward to engine', function () {
     $workflow = new Workflow(Definitions::orderStateMachine(), new PropertyMarkingStore('status'));
     $order = new stdClass();
     $order->status = 'draft';
-    $order2 = new stdClass();
-    $order2->status = 'submitted';
-
-    $order = (function () {
-        $o = new stdClass();
-        $o->status = 'draft';
-        return $o;
-    })();
 
     $calls = [];
 

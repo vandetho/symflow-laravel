@@ -82,6 +82,15 @@ $workflow->apply($order, 'submit');
 - **Laravel events** -- 7 event classes for the full transition lifecycle
 - **Artisan commands** -- `laraflow:validate`, `laraflow:mermaid`, `laraflow:dot`
 
+## Examples
+
+End-to-end Laravel apps built on `symflow-laravel`:
+
+| Repo | What it shows |
+|------|---------------|
+| [symflow-laravel-expense-approval](https://github.com/vandetho/symflow-laravel-expense-approval) | Multi-stage expense approval as a Petri net — parallel legal/finance/manager review, Livewire 3 + Tailwind, Fly.io-ready |
+| [symflow-laravel-issue-tracker](https://github.com/vandetho/symflow-laravel-issue-tracker) | Issue tracker with parallel code-review + qa-review tracks — Petri net + Livewire, Fly.io-ready |
+
 ## Documentation
 
 | Guide | Description |

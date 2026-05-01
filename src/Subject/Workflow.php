@@ -141,6 +141,16 @@ class Workflow
                     subject: $subject,
                 );
 
+                // Mirror prior listeners' blocked state so this listener can
+                // observe it, matching the engine-layer dispatch where every
+                // listener receives the same GuardEvent instance.
+                if ($event->isBlocked()) {
+                    $subjectEvent->block(
+                        $event->getBlockedReason() ?? '',
+                        $event->getBlockedCode(),
+                    );
+                }
+
                 $listener($subjectEvent);
 
                 if ($subjectEvent->isBlocked()) {
