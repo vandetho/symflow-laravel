@@ -6,6 +6,7 @@ namespace Laraflow\Engine;
 
 use Closure;
 use Laraflow\Contracts\GuardEvaluatorInterface;
+use Laraflow\Data\GuardResult;
 use Laraflow\Data\Marking;
 use Laraflow\Data\MiddlewareContext;
 use Laraflow\Data\Transition;
@@ -139,16 +140,20 @@ class WorkflowEngine
         }
 
         if ($transition->guard !== null && $this->guardEvaluator !== null) {
-            $guardPassed = $this->guardEvaluator->evaluate(
+            $guardOutcome = $this->guardEvaluator->evaluate(
                 $transition->guard,
                 $this->getMarking(),
                 $transition,
             );
 
-            if (! $guardPassed) {
+            $guardResult = $guardOutcome instanceof GuardResult
+                ? $guardOutcome
+                : new GuardResult(allowed: $guardOutcome);
+
+            if (! $guardResult->allowed) {
                 $blockers[] = new TransitionBlocker(
-                    code: 'guard_blocked',
-                    message: "Guard \"{$transition->guard}\" blocked the transition",
+                    code: $guardResult->code ?? 'guard_blocked',
+                    message: $guardResult->reason ?? "Guard \"{$transition->guard}\" blocked the transition",
                 );
 
                 return new TransitionResult(allowed: false, blockers: $blockers);

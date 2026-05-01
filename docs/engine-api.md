@@ -79,14 +79,15 @@ Implement `GuardEvaluatorInterface` to control transition access:
 
 ```php
 use Laraflow\Contracts\GuardEvaluatorInterface;
+use Laraflow\Data\GuardResult;
 use Laraflow\Data\Marking;
 use Laraflow\Data\Transition;
 
 class MyGuardEvaluator implements GuardEvaluatorInterface
 {
-    public function evaluate(string $expression, Marking $marking, Transition $transition): bool
+    public function evaluate(string $expression, Marking $marking, Transition $transition): bool|GuardResult
     {
-        // Parse $expression and return true to allow, false to block
+        // Return a plain bool for simple allow/deny...
         return match ($expression) {
             'is_admin' => auth()->user()?->isAdmin() ?? false,
             default => true,
@@ -94,6 +95,21 @@ class MyGuardEvaluator implements GuardEvaluatorInterface
     }
 }
 ```
+
+Return a `GuardResult` when you want the failure reason to flow into the `TransitionBlocker` (so the UI/API can show it without inspecting the guard expression):
+
+```php
+public function evaluate(string $expression, Marking $marking, Transition $transition): bool|GuardResult
+{
+    if ($expression === 'is_admin' && ! auth()->user()?->isAdmin()) {
+        return GuardResult::deny('You must be an admin to approve.', 'not_admin');
+    }
+
+    return GuardResult::allow();
+}
+```
+
+When the guard returns `GuardResult::deny($reason, $code)`, the blocker uses `$code` (or `'guard_blocked'` if omitted) and `$reason` as its message. A plain `false` falls back to the legacy `guard_blocked` code with the expression in the message.
 
 Add guards to transitions:
 

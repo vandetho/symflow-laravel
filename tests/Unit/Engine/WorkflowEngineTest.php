@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Laraflow\Contracts\GuardEvaluatorInterface;
+use Laraflow\Data\GuardResult;
 use Laraflow\Data\Marking;
 use Laraflow\Data\Transition;
 use Laraflow\Data\WorkflowEvent;
@@ -164,6 +165,47 @@ test('guard: transitions without guards are not affected', function () {
     };
     $engine = new WorkflowEngine(Definitions::guardedStateMachine(), $evaluator);
     expect($engine->can('deny')->allowed)->toBeTrue();
+});
+
+test('guard: GuardResult::deny propagates reason and code into blocker', function () {
+    $evaluator = new class implements GuardEvaluatorInterface {
+        public function evaluate(string $expression, Marking $marking, Transition $transition): GuardResult
+        {
+            return GuardResult::deny('User is not an admin', 'not_admin');
+        }
+    };
+    $engine = new WorkflowEngine(Definitions::guardedStateMachine(), $evaluator);
+    $result = $engine->can('approve');
+
+    expect($result->allowed)->toBeFalse();
+    expect($result->blockers[0]->code)->toBe('not_admin');
+    expect($result->blockers[0]->message)->toBe('User is not an admin');
+});
+
+test('guard: GuardResult::deny without code falls back to guard_blocked', function () {
+    $evaluator = new class implements GuardEvaluatorInterface {
+        public function evaluate(string $expression, Marking $marking, Transition $transition): GuardResult
+        {
+            return GuardResult::deny('Outside business hours');
+        }
+    };
+    $engine = new WorkflowEngine(Definitions::guardedStateMachine(), $evaluator);
+    $result = $engine->can('approve');
+
+    expect($result->allowed)->toBeFalse();
+    expect($result->blockers[0]->code)->toBe('guard_blocked');
+    expect($result->blockers[0]->message)->toBe('Outside business hours');
+});
+
+test('guard: GuardResult::allow permits the transition', function () {
+    $evaluator = new class implements GuardEvaluatorInterface {
+        public function evaluate(string $expression, Marking $marking, Transition $transition): GuardResult
+        {
+            return GuardResult::allow();
+        }
+    };
+    $engine = new WorkflowEngine(Definitions::guardedStateMachine(), $evaluator);
+    expect($engine->can('approve')->allowed)->toBeTrue();
 });
 
 // --- Events ---
