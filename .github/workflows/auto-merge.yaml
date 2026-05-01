@@ -8,14 +8,40 @@ permissions:
     contents: write
     pull-requests: write
 
+# IMPORTANT: this workflow uses a GitHub App installation token instead of the
+# default GITHUB_TOKEN because pushes performed by GITHUB_TOKEN do NOT trigger
+# downstream workflows (GitHub anti-recursion safety). With GITHUB_TOKEN, an
+# auto-merged release-please PR would land on main without firing CI, which
+# means release-please.yaml (workflow_run on CI) would never run and the
+# GitHub release / git tag would not be created.
+#
+# Required setup (one-time):
+#   1. Create a GitHub App owned by your account:
+#      Settings -> Developer settings -> GitHub Apps -> New GitHub App
+#      - Repository permissions: Contents (Read and write), Pull requests (Read and write)
+#      - Webhook: disable (uncheck Active)
+#   2. Generate a private key on the app's settings page (downloads a .pem file).
+#   3. Install the app on this repo (App page -> Install App -> select repo).
+#   4. In this repo: Settings -> Secrets and variables -> Actions:
+#      - Variable BOT_APP_ID = numeric app ID (visible on the app's About page)
+#      - Secret BOT_PRIVATE_KEY = full contents of the .pem file
+#
+# The token minted here is short-lived (1 hour) and scoped to the configured
+# repo permissions, so it's strictly safer than a long-lived PAT.
 jobs:
     release-please:
         if: ${{ startsWith(github.head_ref, 'release-please--') }}
         runs-on: ubuntu-latest
         steps:
+            - uses: actions/create-github-app-token@v2
+              id: app-token
+              with:
+                  app-id: ${{ vars.BOT_APP_ID }}
+                  private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+
             - run: gh pr merge --auto --squash "${{ github.event.pull_request.html_url }}"
               env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
     dependabot:
         if: ${{ github.actor == 'dependabot[bot]' }}
@@ -27,8 +53,16 @@ jobs:
               with:
                   github-token: ${{ secrets.GITHUB_TOKEN }}
 
+            - name: Mint app token
+              if: ${{ steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor' }}
+              uses: actions/create-github-app-token@v2
+              id: app-token
+              with:
+                  app-id: ${{ vars.BOT_APP_ID }}
+                  private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+
             - name: Auto-merge patch and minor updates
               if: ${{ steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor' }}
               run: gh pr merge --auto --squash "${{ github.event.pull_request.html_url }}"
               env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token }}

@@ -103,8 +103,27 @@ composer install
 - **Conventional commits** (`feat:` -> minor, `fix:` -> patch, `chore:`/`docs:` -> hidden, `test:`/`ci:`/`refactor:` -> hidden)
 - **release-please** automates version bumps and `CHANGELOG.md` (config: `release-please-config.json`, manifest: `.release-please-manifest.json`, release-type: `simple`)
 - **CI** (`ci.yaml`): matrix tests on push/PR to `main` (PHP 8.2/8.3/8.4 x Laravel 11/12)
-- **Release** (`release-please.yaml`): on push to `main`, opens/updates a Release PR; merging it creates the `vX.Y.Z` tag and GitHub release with auto-generated notes
+- **Release** (`release-please.yaml`): triggered by `workflow_run` of CI on `main`. release-please reads the manifest vs git tags; if the manifest is ahead, it cuts the GitHub release + tag. Otherwise it opens/updates the Release PR.
+- **Auto-merge** (`auto-merge.yaml`): squash-merges the release-please PR (and patch/minor dependabot PRs) once checks pass. **Uses a GitHub App installation token** — see note below.
 - **Packagist** auto-syncs from GitHub via webhook (configured on packagist.org, not in this repo)
+
+### Required GitHub App: `BOT_APP_ID` + `BOT_PRIVATE_KEY`
+
+The auto-merge workflow needs a non-`GITHUB_TOKEN` identity because pushes made by `GITHUB_TOKEN` are intentionally suppressed from triggering further workflows (anti-recursion safety). Without it, the squash-merge of a release-please PR lands on `main` silently and `release-please.yaml` never fires, so the GitHub release/tag is never created.
+
+The workflow mints a short-lived (1 hour) installation token via `actions/create-github-app-token@v2`, scoped to the app's configured permissions on this repo.
+
+Setup (one-time):
+1. Create a GitHub App: Settings -> Developer settings -> GitHub Apps -> New GitHub App
+   - Repository permissions: `Contents` Read and write, `Pull requests` Read and write
+   - Webhook: disable (uncheck Active)
+2. On the app's settings page, generate a private key (downloads a `.pem` file).
+3. Install the app on this repo (App page -> Install App -> select `vandetho/symflow-laravel`).
+4. In this repo's Settings -> Secrets and variables -> Actions:
+   - Variable `BOT_APP_ID` = numeric app ID (from the app's About page)
+   - Secret `BOT_PRIVATE_KEY` = full contents of the `.pem` file
+
+GitHub App tokens are preferred over PATs because they don't expire, aren't tied to a personal account, and produce signed commits.
 
 ---
 
