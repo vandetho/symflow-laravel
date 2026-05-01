@@ -33,7 +33,7 @@ jobs:
         if: ${{ startsWith(github.head_ref, 'release-please--') }}
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/create-github-app-token@v2
+            - uses: actions/create-github-app-token@v3
               id: app-token
               with:
                   app-id: ${{ vars.BOT_APP_ID }}
@@ -55,7 +55,7 @@ jobs:
 
             - name: Mint app token
               if: ${{ steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor' }}
-              uses: actions/create-github-app-token@v2
+              uses: actions/create-github-app-token@v3
               id: app-token
               with:
                   app-id: ${{ vars.BOT_APP_ID }}
