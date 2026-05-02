@@ -5,6 +5,7 @@ on:
         workflows: [CI]
         types: [completed]
         branches: [main]
+    workflow_dispatch:
 
 permissions:
     contents: write
@@ -12,7 +13,7 @@ permissions:
 
 jobs:
     release-please:
-        if: ${{ github.event.workflow_run.conclusion == 'success' }}
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
         runs-on: ubuntu-latest
         steps:
             - uses: googleapis/release-please-action@v5
