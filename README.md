@@ -73,6 +73,10 @@ $workflow->apply($order, 'submit');
 - **Subject-driven API** -- mirrors Symfony's `$workflow->apply($entity, 'submit')` pattern
 - **Marking stores** -- `property` and `method` stores, or implement your own
 - **Pluggable guards** -- `GuardEvaluatorInterface` for custom authorization
+- **Structured guard results** -- return `GuardResult::deny($reason, $code)` so blockers carry a human-readable reason
+- **Blockable Guard event** -- listeners can veto a transition via `$event->setBlocked(true, reason, code)`
+- **Listener scoping & priority** -- `on()` accepts an optional transition name and priority for declarative ordering
+- **Listener error modes** -- `ListenerErrorMode::Throw / Collect / Swallow` controls how listener exceptions surface
 - **Weighted arcs** -- `consumeWeight` / `produceWeight` for multi-token transitions
 - **Middleware** -- wrap `apply()` with logging, transactions, metrics
 - **Validation** -- 8 error types including BFS reachability analysis
