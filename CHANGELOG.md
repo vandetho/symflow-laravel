@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.1](https://github.com/vandetho/symflow-laravel/compare/v1.1.0...v1.1.1) (2026-05-02)
+
+
+### Documentation
+
+* **events:** document listener scoping and Symfony vs Laravel dispatch ([9bad6c3](https://github.com/vandetho/symflow-laravel/commit/9bad6c38c455a0c924b7636b95c56daa581836fa))
+* **readme:** add symflow-laravel-order-lifecycle to examples ([91ab569](https://github.com/vandetho/symflow-laravel/commit/91ab569d9e86e8a833ed60b5ad33d1ecd5a1065f))
+* **readme:** document 1.1.0 engine features ([114802a](https://github.com/vandetho/symflow-laravel/commit/114802a75eefb8a9b3111dc1c0a9130c3ce16656))
+
 ## [1.1.0](https://github.com/vandetho/symflow-laravel/compare/v1.0.1...v1.1.0) (2026-05-01)
 
 
