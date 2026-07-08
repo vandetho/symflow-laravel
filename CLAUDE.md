@@ -7,7 +7,7 @@ Symfony-compatible workflow engine for Laravel. State machines, Petri nets, guar
 - **Packagist:** https://packagist.org/packages/vandetho/symflow-laravel
 - **Repo:** https://github.com/vandetho/symflow-laravel
 - **Sibling:** [symflow](https://www.npmjs.com/package/symflow) (TypeScript/Node.js version, separate repo)
-- **Stack:** PHP 8.2+ / Laravel 11+ / Pest (test) / symfony/yaml
+- **Stack:** PHP 8.2+ / Laravel 12+ / Pest (test) / symfony/yaml
 - **Namespace:** `Laraflow\`
 
 ---
@@ -102,7 +102,7 @@ composer install
 
 - **Conventional commits** (`feat:` -> minor, `fix:` -> patch, `chore:`/`docs:` -> hidden, `test:`/`ci:`/`refactor:` -> hidden)
 - **release-please** automates version bumps and `CHANGELOG.md` (config: `release-please-config.json`, manifest: `.release-please-manifest.json`, release-type: `simple`)
-- **CI** (`ci.yaml`): matrix tests on push/PR to `main` (PHP 8.2/8.3/8.4 x Laravel 11/12)
+- **CI** (`ci.yaml`): matrix tests on push/PR to `main` (PHP 8.2/8.3/8.4 x Laravel 12)
 - **Release** (`release-please.yaml`): triggered by `workflow_run` of CI on `main`. release-please reads the manifest vs git tags; if the manifest is ahead, it cuts the GitHub release + tag. Otherwise it opens/updates the Release PR.
 - **Auto-merge** (`auto-merge.yaml`): squash-merges the release-please PR (and patch/minor dependabot PRs) once checks pass. **Uses a GitHub App installation token** — see note below.
 - **Packagist** auto-syncs from GitHub via webhook (configured on packagist.org, not in this repo)
@@ -130,7 +130,7 @@ GitHub App tokens are preferred over PATs because they don't expire, aren't tied
 ## Key Constraints
 
 - PHP 8.2+ strict types
-- Laravel 11+ / 12+ compatibility
+- Laravel 12+ compatibility
 - Only runtime dep: `symfony/yaml`
 - Marking is `array<string, int>` wrapped in `Marking` class
 - Engine returns cloned markings (immutable read)
