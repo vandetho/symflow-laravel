@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/vandetho/symflow-laravel/compare/v1.1.1...v2.0.0) (2026-07-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* minimum supported Laravel is now 12.0.
+
+### Features
+
+* drop Laravel 11 support (past security-EOL) ([#13](https://github.com/vandetho/symflow-laravel/issues/13)) ([20b351e](https://github.com/vandetho/symflow-laravel/commit/20b351e8f2707361ea1a5e735041317675809fa0))
+
 ## [1.1.1](https://github.com/vandetho/symflow-laravel/compare/v1.1.0...v1.1.1) (2026-05-02)
 
 
