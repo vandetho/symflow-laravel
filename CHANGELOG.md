@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/vandetho/symflow-laravel/compare/v2.0.0...v2.1.0) (2026-09-17)
+
+
+### Features
+
+* support Laravel 13 ([#16](https://github.com/vandetho/symflow-laravel/issues/16)) ([c698394](https://github.com/vandetho/symflow-laravel/commit/c698394df1cea71e3ac19c94d2474b0122a9cb3e)), closes [#15](https://github.com/vandetho/symflow-laravel/issues/15)
+
 ## [2.0.0](https://github.com/vandetho/symflow-laravel/compare/v1.1.1...v2.0.0) (2026-07-08)
 
 
