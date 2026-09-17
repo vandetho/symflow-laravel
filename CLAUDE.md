@@ -7,7 +7,7 @@ Symfony-compatible workflow engine for Laravel. State machines, Petri nets, guar
 - **Packagist:** https://packagist.org/packages/vandetho/symflow-laravel
 - **Repo:** https://github.com/vandetho/symflow-laravel
 - **Sibling:** [symflow](https://www.npmjs.com/package/symflow) (TypeScript/Node.js version, separate repo)
-- **Stack:** PHP 8.2+ / Laravel 12+ / Pest (test) / symfony/yaml
+- **Stack:** PHP 8.2+ / Laravel 12-13 / Pest (test) / symfony/yaml
 - **Namespace:** `Laraflow\`
 
 ---
@@ -85,7 +85,7 @@ All readonly value objects: `Place`, `Transition`, `WorkflowDefinition`, `Workfl
 
 ```bash
 composer install
-./vendor/bin/pest              # 187 tests, 339 assertions
+./vendor/bin/pest              # 217 tests, 395 assertions
 ```
 
 ### Tests
@@ -94,7 +94,7 @@ composer install
 - Fixtures in `tests/Fixtures/Definitions.php` and `tests/Fixtures/*.yaml`
 - Unit tests: Engine, Validator, Analyzer, Subject, Import, Export, Scenarios (article-workflow, blog-event, php-enum)
 - Feature tests: ServiceProvider, Facade, Artisan commands
-- 187 tests across 21 test files
+- 217 tests across 21 test files
 
 ---
 
@@ -102,7 +102,7 @@ composer install
 
 - **Conventional commits** (`feat:` -> minor, `fix:` -> patch, `chore:`/`docs:` -> hidden, `test:`/`ci:`/`refactor:` -> hidden)
 - **release-please** automates version bumps and `CHANGELOG.md` (config: `release-please-config.json`, manifest: `.release-please-manifest.json`, release-type: `simple`)
-- **CI** (`ci.yaml`): matrix tests on push/PR to `main` (PHP 8.2/8.3/8.4 x Laravel 12)
+- **CI** (`ci.yaml`): matrix tests on push/PR to `main` (PHP 8.2/8.3/8.4 x Laravel 12, PHP 8.3/8.4 x Laravel 13)
 - **Release** (`release-please.yaml`): triggered by `workflow_run` of CI on `main`. release-please reads the manifest vs git tags; if the manifest is ahead, it cuts the GitHub release + tag. Otherwise it opens/updates the Release PR.
 - **Auto-merge** (`auto-merge.yaml`): squash-merges the release-please PR (and patch/minor dependabot PRs) once checks pass. **Uses a GitHub App installation token** — see note below.
 - **Packagist** auto-syncs from GitHub via webhook (configured on packagist.org, not in this repo)
@@ -130,7 +130,7 @@ GitHub App tokens are preferred over PATs because they don't expire, aren't tied
 ## Key Constraints
 
 - PHP 8.2+ strict types
-- Laravel 12+ compatibility
+- Laravel 12 and 13 compatibility (Laravel 13 requires PHP 8.3+)
 - Only runtime dep: `symfony/yaml`
 - Marking is `array<string, int>` wrapped in `Marking` class
 - Engine returns cloned markings (immutable read)
